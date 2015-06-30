@@ -1,0 +1,13 @@
+Source: pr2-wrt610n
+Section: config
+Priority: extra
+Maintainer: Jeremy Leibs <leibs@willowgarage.com>
+Build-Depends: debhelper (>= 5)
+Standards-Version: 3.7.2
+
+Package: pr2-wrt610n
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, python, curl, python-pycurl
+Description: Provides a script for configuring the linksys wrt610n
+Provides: ${diverted-files}
+Conflicts: ${diverted-files}

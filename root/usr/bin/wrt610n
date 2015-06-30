@@ -1,0 +1,554 @@
+#! /usr/bin/env python
+
+"""
+usage: %(progname)s [args]
+"""
+
+import os, sys, string, time, socket, struct, re, StringIO
+from optparse import OptionParser
+import urllib, urllib2, httplib
+import base64
+import pycurl
+import subprocess
+import getpass
+import csv
+
+class DDWRT:
+  def __init__(self, hostname, username, password):
+    self.hostname = hostname
+    self.username = username
+    self.password = password
+    self.passman = urllib2.HTTPPasswordMgrWithDefaultRealm()
+
+  def login(self, password = None):
+    if password != None:
+      self.password = password
+
+    socket.setdefaulttimeout(5)
+    auth_handler = urllib2.HTTPBasicAuthHandler(self.passman)
+    opener = urllib2.build_opener(auth_handler)
+    urllib2.install_opener(opener)
+    
+    self.passman.add_password(realm=None,
+                              uri="http://%s/"%(self.hostname),
+                              user=self.username,
+                              passwd=self.password)
+
+    try:
+      lines = urllib2.urlopen("http://%s/Upgrade.asp"%(self.hostname)).readlines();
+    except urllib2.HTTPError:
+#      print >> sys.stderr, "Invalid password."
+#      new_passwd = getpass.getpass()
+#      if (len(new_passwd) > 0):
+#        return self.login(new_passwd)
+#      else:
+      return False
+    except RuntimeError:
+      return False
+
+    # If we got the change-password prompt, set it to default
+    if True in ["""<form name="changepassword" action="apply.cgi" method="post">""" in l for l in lines]:
+      lines = urllib2.urlopen("http://%s/apply.cgi"%(self.hostname),data="submit_button=index&submit_type=changepass&next_page=Info.htm&change_action=gozila_cgi&action=Apply&http_username=root&http_passwd=%s&http_passwdConfirm=%s"%(self.password,self.password)).readlines();
+      return self.login()
+
+    return True
+
+
+  def apply(self, args):
+    url = "http://%s/apply.cgi" % self.hostname
+
+    # Find the authorization explicitly
+    auth = self.passman.find_user_password(None,url)
+    base64string = base64.encodestring("%s:%s" % auth)[:-1]
+
+    # We set the authorization directly since otherwise urllib2 actually crashes
+    # (apply.cgi has poor handling of failed authorization)
+    req = urllib2.Request(url)
+    req.add_header("Authorization", "Basic %s" % base64string)
+
+    if args:
+      req.data = urllib.urlencode(args)
+      try:
+        fp = urllib2.urlopen(req)
+        body = fp.read()
+        fp.close()
+      except httplib.BadStatusLine, e:
+        print >> sys.stderr, "Failure to authenticate when applying sttings"
+
+
+  def config(self, name, newip, apmode, essid, dhcpserver, newpasswd, net_mode):
+
+    print "Configuring router with name: %s, ip: %s, apmode: %s, essid: %s, and dhcpserver: %s"%(name, newip, apmode, essid, dhcpserver)
+
+    ip = newip.split(".")
+    
+    if apmode=="client":
+      mode='sta'
+    else:
+      mode='ap'
+
+    if dhcpserver:
+      dhcp='dhcp'
+    else:
+      dhcp='static'
+
+    args = {}
+    args["submit_button"]="index"
+    args["action"]="Apply"
+    args["change_action"]=""
+    args["submit_type"]=""
+    args["now_proto"]="dhcp"
+    args["dhcp_dnsmasq"]="1"
+    args["dns_dnsmasq"]="1"
+    args["auth_dnsmasq"]="1"
+    args["fullswitch"]="0"
+    args["lan_ipaddr"]="4"
+    args["wan_proto"]="dhcp"
+    args["lan_stp"]="0"
+    args["router_name"]=name
+    args["wan_hostname"]=""
+    args["wan_domain"]=""
+    args["mtu_enable"]="0"
+    args["lan_ipaddr_0"]=ip[0]
+    args["lan_ipaddr_1"]=ip[1]
+    args["lan_ipaddr_2"]=ip[2]
+    args["lan_ipaddr_3"]=ip[3]
+    args["lan_netmask"]="4"
+    args["lan_netmask_0"]="255"
+    args["lan_netmask_1"]="255"
+    args["lan_netmask_2"]="255"
+    args["lan_netmask_3"]="0"
+    args["lan_gateway"]="4"
+    args["lan_gateway_0"]="0"
+    args["lan_gateway_1"]="0"
+    args["lan_gateway_2"]="0"
+    args["lan_gateway_3"]="0"
+    args["sv_localdns"]="4"
+    args["sv_localdns_0"]="0"
+    args["sv_localdns_1"]="0"
+    args["sv_localdns_2"]="0"
+    args["sv_localdns_3"]="0"
+    args["dhcpfwd_enable"]="0"
+    args["lan_proto"]=dhcp
+    args["dhcp_check"]=""
+    args["dhcp_start"]="100"
+    args["dhcp_num"]="50"
+    args["dhcp_lease"]="1440"
+    args["wan_dns"]="4"
+    args["wan_dns0_0"]="0"
+    args["wan_dns0_1"]="0"
+    args["wan_dns0_2"]="0"
+    args["wan_dns0_3"]="0"
+    args["wan_dns1_0"]="0"
+    args["wan_dns1_1"]="0"
+    args["wan_dns1_2"]="0"
+    args["wan_dns1_3"]="0"
+    args["wan_dns2_0"]="0"
+    args["wan_dns2_1"]="0"
+    args["wan_dns2_2"]="0"
+    args["wan_dns2_3"]="0"
+    args["wan_wins"]="4"
+    args["wan_wins_0"]="0"
+    args["wan_wins_1"]="0"
+    args["wan_wins_2"]="0"
+    args["wan_wins_3"]="0"
+    args["_dhcp_dnsmasq"]="1"
+    args["_dns_dnsmasq"]="1"
+    args["_auth_dnsmasq"]="1"
+    args["ntp_enable"]="1"
+    args["time_zone"]="%2B01"
+    args["daylight_time"]="3"
+    args["ntp_server"]=""
+
+    self.apply(args)
+    time.sleep(2)
+
+    args["submit_button"]="Wireless_Basic"
+    args["action"]="ApplyTake"
+    args["change_action"]="gozila_cgi"
+    args["submit_type"]="save"
+    args["wl0_nctrlsb"]=""
+    args["wl1_nctrlsb"]=""
+    args["iface"]=""
+    args["wl0_mode"]=mode
+    args["wl0_net_mode"]=net_mode
+    args["wl0_ssid"]=essid
+    args["wl0_distance"]="500"
+    args["eth1_bridged"]="1"
+    args["eth1_multicast"]="0"
+    args["eth1_nat"]="1"
+    args["eth1_ipaddr"]="4"
+    args["eth1_ipaddr_0"]="0"
+    args["eth1_ipaddr_1"]="0"
+    args["eth1_ipaddr_2"]="0"
+    args["eth1_ipaddr_3"]="0"
+    args["eth1_netmask"]="4"
+    args["eth1_netmask_0"]="0"
+    args["eth1_netmask_1"]="0"
+    args["eth1_netmask_2"]="0"
+    args["eth1_netmask_3"]="0"
+    args["wl1_mode"]="ap"
+    args["wl1_net_mode"]="disabled"
+    args["wl1_ssid"]="dd-wrt"
+    args["wl1_closed"]="0"
+    args["wl1_distance"]="2000"
+    args["eth2_bridged"]="1"
+    args["eth2_multicast"]="0"
+    args["eth2_nat"]="1"
+    args["eth2_ipaddr"]="4"
+    args["eth2_ipaddr_0"]="0"
+    args["eth2_ipaddr_1"]="0"
+    args["eth2_ipaddr_2"]="0"
+    args["eth2_ipaddr_3"]="0"
+    args["eth2_netmask"]="4"
+    args["eth2_netmask_0"]="0"
+    args["eth2_netmask_1"]="0"
+    args["eth2_netmask_2"]="0"
+    args["eth2_netmask_3"]="0"
+
+    self.apply(args)
+    self.waitForBoot(newip)
+
+    if newpasswd:
+      args = {}
+      args["submit_button"]="Management"
+      args["action"]="Apply"
+      args["change_action"]=""
+      args["submit_type"]=""
+      args["commit"]="1"
+      args["PasswdModify"]="0"
+      args["remote_mgt_https"]="0"
+      args["http_enable"]="1"
+      args["info_passwd"]="0"
+      args["https_enable"]="0"
+      args["http_username"]="root"
+      args["http_passwd"]=newpasswd
+      args["http_passwdConfirm"]=newpasswd
+      args["_http_enable"]="1"
+      args["refresh_time"]="3"
+      args["status_auth"]="1"
+      args["maskmac"]="1"
+      args["remote_management"]="0"
+      args["remote_mgt_telnet"]="0"
+      args["remote_ip_any"]="1"
+      args["remote_ip"]="4"
+      args["remote_ip_0"]="0"
+      args["remote_ip_1"]="0"
+      args["remote_ip_2"]="0"
+      args["remote_ip_3"]="0"
+      args["remote_ip_4"]="0"
+      args["boot_wait"]="on"
+      args["cron_enable"]="1"
+      args["cron_jobs"]=""
+      args["nas_enable"]="1"
+      args["resetbutton_enable"]="1"
+      args["zebra_enable"]="1"
+      args["enable_jffs2"]="0"
+      args["clean_jffs2"]="0"
+      args["language"]="english"
+      args["ip_conntrack_max"]="4096"
+      args["ip_conntrack_tcp_timeouts"]="3600"
+      args["ip_conntrack_udp_timeouts"]="120"
+      args["router_style"]="elegant"
+
+      print "Applying new router password."
+      self.apply(args)
+      self.password = newpasswd
+
+
+
+  def factory_defaults(self):
+
+    print "Resetting router fo factory defaults..."
+  
+    args = {}
+    args["submit_button"]="Factory_Defaults"
+    args["action"]="Restore"
+    args["change_action"]=""
+    args["submit_type"]=""
+    args["FactoryDefaults"]="1"
+
+    self.apply(args)
+  
+    self.waitForBoot("192.168.1.1")
+
+
+  def saveConfig(self, save_file):
+    url = "http://%s/nvrambak.bin" % self.hostname
+    out = open(save_file, 'wb')
+    save = urllib2.urlopen(url)
+    out.write(save.read())
+    out.close()
+    print "Saved settings configuration as: %s"%save_file
+
+
+  def waitForBoot(self, newip=None, password=None):
+
+    oldip = self.hostname
+
+    if newip != None:
+      self.hostname = newip
+    else:
+      newip = self.hostname
+
+    # Use ip route to determine if we are likely to still be able to find the router
+    if1 = "Unknown1"
+    runip = subprocess.Popen(["ip", "route", "get", oldip], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (o,e) = runip.communicate()
+    res = runip.wait()
+
+    m = re.search(r"dev (\w+)", o)
+    if m is not None:
+      if1 = m.group(1)
+
+    if2 = "Unknown2"
+    runip = subprocess.Popen(["ip", "route", "get", newip], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (o,e) = runip.communicate()
+    res = runip.wait()
+
+    m = re.search(r"dev (\w+)", o)
+    if m is not None:
+      if2 = m.group(1)
+
+    if (if1 != if2):
+      print >> sys.stderr, "The configuration of the device has likely changed."
+      print >> sys.stderr, ""
+      print >> sys.stderr, "old ip %s: \t routed via '%s'"%(oldip, if1)
+      print >> sys.stderr, "new ip %s: \t routed via '%s'"%(newip, if2)
+      print >> sys.stderr, ""
+      print >> sys.stderr, "You probably want to add an ethernet alias such as: "
+      print >> sys.stderr, ""
+      print >> sys.stderr, "\tsudo ifconfig %s:1 %s.X"%(if1,".".join(newip.split(".")[0:3]))
+      print >> sys.stderr, ""
+      print >> sys.stderr, "in order to talk to the router."
+      sys.exit(1)
+  
+    fw = "Unknown"
+    print "Waiting for router to boot..."
+
+    # Give the router a little time to start the reboot
+    time.sleep(5)
+
+    found = False
+    for i in xrange(100):
+      try:
+        if self.login(password):
+          fw = self.getFirmwareVersion()
+          found = True
+          break
+      except urllib2.HTTPError:
+        time.sleep(1)
+      except urllib2.URLError:
+        time.sleep(1)
+      except urllib2.httplib.BadStatusLine:
+        time.sleep(1)
+    
+
+    if found:
+      print "Router has resumed successfully on: %s with firmare: '%s'"%(newip,fw)
+    else:
+      print >> sys.stderr, "Router has not resumed successfully.  Please go to http://pr.willowgarage.com/wiki/PR2/Admin/Troubleshooting for information on debugging."
+      sys.exit(1)
+
+
+
+  def loadConfig(self, fn):
+    cf = open(fn)
+    cf_dat = cf.read()
+    ind = cf_dat.find("lan_ipaddr")
+    if ind < 0:
+      print >> sys.stderr, "Could not find lan_ipaddr in config file.  Probably not a config file afterall."
+      sys.exit(1)
+
+    ind = ind + len("lan_ipaddr")
+    bytes = struct.unpack("H",cf_dat[ind:ind+2])[0]
+    new_ip = cf_dat[ind+2:ind+2+bytes]
+    print "Planning on new ip '%s'"%new_ip
+
+    print "Uploading new config file..."
+    # All attempts at multi-part POST handling resulted in failure.  cURL seems to do the trick though:
+    runcurl = subprocess.Popen(["curl", "-F", "file=@%s"%fn, "-u", "root:%s"%self.password, "http://%s/nvram.cgi"%self.hostname], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (o,e) = runcurl.communicate()
+    res = runcurl.wait()
+    if res != 0:
+      if res == 26:
+        print >> sys.stderr, "Could not read firmware file."
+      else:
+        print >> sys.stderr, "Curl failure: %d ('man curl' for more info)"%res
+      sys.exit(1)
+    else:
+      print "Configuration file uploaded successfully!"
+
+    self.waitForBoot(new_ip)
+
+  def loadFirmware(self, fn, force_firmware=False):
+    if (fn[-4:] != ".bin"):
+      print >> sys.stderr, "File: '%s' does not end in '.bin'  Unlikely to be a firmware file."%fn
+      sys.exit(1)
+
+    # Last chance to cancel
+    print "You are about to upload new firmware to the linksys 610n"
+    print "DO NOT KILL THIS PROCESS OR REBOOT THE ROUTER WHILE THIS IS HAPPENING OR YOU MAY BRICK YOUR ROUTER!"
+    if not force_firmware:
+      print "Are you ready to proceed? (y/N)"
+      resp = sys.stdin.readline()
+      if (len(resp) == 0 or resp[0].lower() != 'y'):
+        sys.exit(0)
+
+    print "Uploading new firmware file..."
+    # All attempts at multi-part POST handling resulted in failure.  cURL seems to do the trick though:
+    runcurl = subprocess.Popen(["curl", "-F", "erase=1", "-F", "file=@%s"%fn, "-u", "root:%s"%self.password, "http://%s/upgrade.cgi"%self.hostname], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (o,e) = runcurl.communicate()
+    res = runcurl.wait()
+    if res != 0:
+      if res == 26:
+        print >> sys.stderr, "Could not read firmware file."
+      else:
+        print >> sys.stderr, "Curl failure: %d ('man curl' for more info)"%res
+      sys.exit(1)
+    else:
+      print "Firmware uploaded successfully!"
+
+    self.waitForBoot("192.168.1.1")
+
+
+  def getFirmwareVersion(self):
+    lines = urllib2.urlopen("http://%s/Status_Router.asp"%self.hostname).read();
+    fw = "other"
+    m = re.search(r"""<TD width=125 height=25><script>Capture\(share.firmwarever\)</script>:&nbsp;</TD>\s*<TD><B>(.*)&nbsp;(.*)</B></TD>""", lines)
+    if m is not None:
+      fw = "Linksys " + m.group(1)
+    m = re.search(r"""<div class="label"><script type="text/javascript">Capture\(status_router.sys_firmver\)</script></div>\s*(.*)\s*</div>""", lines)
+    if m is not None:
+      fw = m.group(1)  
+    return fw
+
+  def getModel(self):
+    lines = urllib2.urlopen("http://%s/Status_Router.asp"%self.hostname).read();
+    fw = "other"
+    
+    m = re.search(r"""<div class="label"><script type="text/javascript">Capture\(status_router.sys_model\)</script></div>\s*(.*)\s*</div>""", lines)
+    if m is not None:
+      fw = m.group(1)  
+    return fw
+
+  def site_survey(self):
+    url = "http://%s/Site_Survey.asp" % self.hostname
+
+    fp = urllib2.urlopen(url)
+    body = fp.read()
+    fp.close()
+    
+    lines = body.split("\n")
+    for i in range(len(lines)):
+      if lines[i].startswith("var table = "):
+        break
+
+    aplines = []
+    for j in range(i+1, len(lines)):
+      if lines[j].startswith(");"): break
+      line = lines[j].strip()
+      if not line: continue
+      if line[0] == ",": line = line[1:]
+
+      aplines.append(line)
+
+    aps = {}
+        
+    fp = StringIO.StringIO(string.join(aplines, '\n'))
+    reader = csv.reader(fp)
+    for row in reader:
+      essid = row[0]
+      macattr = row[2]
+      channel = int(row[3])
+      rssi = int(row[4])
+      noise = int(row[5])
+      beacon = int(row[6])
+      
+      aps[essid] = row
+
+    for ap, row in aps.items():
+      print ap, row[8][:20]
+
+
+def main(argv, stdout, environ):
+
+  parser = OptionParser(usage="""usage: wrt610n [-i <ip>] [-p <password>] [-w] [version | firmware | save | load | config]""")
+  parser.add_option("-i","--ipaddr",action="store",type="string", dest="ipaddr",default="192.168.1.1")
+  parser.add_option("-p","--passwd",action="store",type="string", dest="passwd",default="admin")
+  parser.add_option("-w","--wait",action="store_true", dest="wait",default=False)
+  parser.add_option("--factorydefaults",action="store_true",dest="factory_defaults",default=False)
+  parser.add_option("--force",action="store_true", dest="force_firmware",default=False)
+
+  parser.add_option("--name",action="store",type="string", dest="config_name",default="Robot-Wifi")
+  parser.add_option("--newip",action="store",type="string", dest="config_newip",default=None)
+  parser.add_option("--apmode",action="store",type="string", dest="config_apmode",default="client")
+  parser.add_option("--essid",action="store",type="string", dest="config_essid",default="willow")
+  parser.add_option("--dhcpserver",action="store_true",dest="config_dhcpserver",default=False)
+  parser.add_option("--newpasswd",action="store",type="string", dest="config_newpasswd",default=None)
+  parser.add_option("--net-mode", action="store", type="string", dest="net_mode", default="n-only", help="Network mode, default: 'n-only'")
+
+#  parser.add_option("-v","--version",action="store_true", dest="version",default=False)
+#  parser.add_option("-a","--access-point",action="store", type="string",dest="ap",default=None)
+#  parser.add_option("--config",action="store_true",dest="factory_defaults",default=False)
+#  parser.add_option("-s","--save",action="store",type="string", dest="save_file",default=None)
+#  parser.add_option("-l","--load",action="store",type="string", dest="load_file",default=None)
+#  parser.add_option("-f","--firmware",action="store", type="string",dest="firmware_file",default=None)
+#  parser.add_option("-c","--connect",action="store", type="string",dest="connect",default=None)
+
+  (options, args) = parser.parse_args()
+
+  if (args < 1):
+    parser.error("Need to give command: version, firmware, save, load, config, or survey")
+
+  ddwrt = DDWRT(options.ipaddr, "root", options.passwd)
+
+  if options.wait:
+    ddwrt.waitForBoot(password=options.passwd)
+
+  try:
+    if not ddwrt.login(options.passwd):
+      print >> sys.stderr, "Password incorrect!"
+      sys.exit(1)
+  except urllib2.URLError, (e,):
+    print >> sys.stderr, "Could not connect to %s: %s"%(options.ipaddr, e)
+    sys.exit(1)
+
+  if (options.factory_defaults):
+    ddwrt.factory_defaults()
+
+  if options.config_newip is None:
+    options.config_newip = options.ipaddr
+
+  if options.config_apmode not in ["ap","client"]:
+    parser.error("Only valid options for --apmode are 'ap' and 'client'")
+
+  try:
+    binaryip = socket.inet_aton(options.config_newip)
+    options.config_newip=socket.inet_ntoa(binaryip)
+  except socket.error:
+    parser.error("%s does not appear to be a properly formed ip address")
+
+  if len(args) > 0:
+    cmd = args[0]
+    if cmd=="version":
+      fv = ddwrt.getFirmwareVersion()
+      print "Router has firmware version: %s"%fv
+    elif cmd=="model":
+      md = ddwrt.getModel()
+      print "Router model: %s"%md
+    elif cmd=="firmware":
+      ddwrt.loadFirmware(args[1], options.force_firmware)
+    elif cmd=="save":
+      ddwrt.saveConfig(args[1])
+    elif cmd=="load":
+      ddwrt.loadConfig(args[1])    
+    elif cmd=="config":
+      ddwrt.config(options.config_name, options.config_newip, options.config_apmode, options.config_essid, options.config_dhcpserver, options.config_newpasswd, options.net_mode)
+    elif cmd=="survey":
+      ddwrt.site_survey()
+    else:
+      parser.error("%s is not a valid command."%cmd)
+
+if __name__ == "__main__":
+  main(sys.argv, sys.stdout, os.environ)

@@ -1,0 +1,2 @@
+#!/bin/bash
+curl -F "agree=I agree to the above terms" www.willowgarage.com
