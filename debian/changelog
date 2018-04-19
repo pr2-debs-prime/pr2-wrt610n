@@ -1,9 +1,12 @@
-pr2-wrt610n (0.5.2-precise) stable; urgency=low
+pr2-wrt610n (0.5.2-xenial) stable; urgency=low
 
+  [ Wim Meeussen ]
   * Incrementing to SVN: r784
    - r784: Allow setting of network mode, #83
 
- -- Wim Meeussen <wim@willowgarage.com>  Tue, 31 May 2011 17:49:39 -0700
+  [ David Feil-Seifer ]
+
+ -- David Feil-Seifer <dave@cse.unr.edu>  Wed, 18 Apr 2018 17:25:08 -0700
 
 pr2-wrt610n (0.5.1-precise) stable; urgency=low
 
