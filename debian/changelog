@@ -1,3 +1,14 @@
+pr2-wrt610n (0.5.2-xenial) trusty; urgency=medium
+
+  [ TheDash ]
+  * Added
+  * Added
+
+  [ David Feil-Seifer ]
+  * added xenial
+
+ -- David Feil-Seifer <dfseifer@azrael>  Mon, 24 Sep 2018 15:46:37 -0700
+
 pr2-wrt610n (0.5.2-precise) stable; urgency=low
 
   * Incrementing to SVN: r784
